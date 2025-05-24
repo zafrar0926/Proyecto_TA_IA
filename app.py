@@ -18,8 +18,10 @@ st.set_page_config(layout="wide", page_title="Fashion Nova App")
 lambda_client = boto3.client("lambda", region_name="us-east-1")
 dynamodb = boto3.resource('dynamodb', region_name='us-east-1')
 tabla = dynamodb.Table('ResenasSentimiento')
+bedrock = boto3.client("bedrock-runtime", region_name="us-east-1")
+ses = boto3.client("ses", region_name="us-east-1")
 
-# Funciones
+# Funciones auxiliares
 def cargar_datos():
     response = tabla.scan()
     df = pd.DataFrame(response['Items'])
@@ -36,6 +38,63 @@ def fig_to_bytes(fig):
     fig.savefig(buf, format="png", bbox_inches='tight')
     buf.seek(0)
     return buf
+
+def construir_prompt_para_llm(df_negativas):
+    reseñas = df_negativas['texto'].tolist()
+    resumen = "\n".join(f"- {r}" for r in reseñas[:10])
+    prompt = (
+        "Eres un experto en experiencia del cliente.\n"
+        "A continuación se presentan reseñas negativas reales:\n\n"
+        f"{resumen}\n\n"
+        "Resume los problemas clave y propone 3 acciones estratégicas para mejorar la satisfacción del cliente."
+    )
+    return prompt
+
+def obtener_respuesta_llm(prompt):
+    body = {
+        "prompt": f"\n\nHuman:\n{prompt}\n\nAssistant:",
+        "max_tokens_to_sample": 800,
+        "temperature": 0.7,
+    }
+    response = bedrock.invoke_model(
+        modelId="anthropic.claude-v2",
+        body=json.dumps(body),
+        contentType="application/json"
+    )
+    resultado = json.loads(response['body'].read())
+    return resultado['completion']
+
+def enviar_informe_por_correo(texto, destinatario):
+    ses.send_email(
+        Source="santiagoz0926@gmail.com",  # tu correo verificado
+        Destination={"ToAddresses": [destinatario]},
+        Message={
+            "Subject": {"Data": "Informe de reseñas críticas - Fashion Nova"},
+            "Body": {
+                "Html": {
+                    "Data": f"""
+                    <html>
+                    <body>
+                        <p style="font-family:Arial, sans-serif; font-size:14px;">
+                        Estimado equipo,<br><br>
+                        A continuación encontrará el informe generado automáticamente a partir del análisis de las reseñas más críticas de clientes:<br><br>
+                        <blockquote style="color:#555;">{texto}</blockquote>
+                        <br>
+                        <p>Para cualquier duda o sugerencia, no dude en contactarnos.</p>
+                        <br>
+                        <p>Atentamente,<br>
+                        Héctor, Anderson, Jorge y Santiago<br>
+                        <span style="font-size:12px;color:#888;">Equipo de Análisis Fashion Nova</span>
+                        </p>
+                        </p>
+                    </body>
+                    </html>
+                    """
+                }
+            }
+        }
+    )
+
 
 @st.cache_data
 def cargar_dataset_base():
@@ -71,14 +130,12 @@ with tab1:
         neg = (df['sentimiento'] == 'NEGATIVE').sum()
         mixed = (df['sentimiento'] == 'MIXED').sum()
 
-        # Totales
         colA, colB, colC, colD = st.columns([1, 1, 1, 2])
         colA.metric("🔢 Total de reseñas", total_reviews)
         colB.metric("✅ Positivas", pos)
         colC.metric("❌ Negativas", neg)
         colD.metric("⚖️ Mixed", mixed)
 
-        # Marcador
         st.subheader("📍 Tendencia global de sentimiento")
         score = pos - neg
         max_score = max(pos, neg, 1)
@@ -100,12 +157,10 @@ with tab1:
         ))
         st.plotly_chart(fig_gauge, use_container_width=True)
 
-        # Tendencia + distribución
         col_g1, col_g2 = st.columns(2)
 
         with col_g1:
             st.subheader("📈 Tendencia de Reviews Recibidas")
-
             hoy = pd.to_datetime("today")
             hace_30_dias = hoy - timedelta(days=30)
             df_filtrado = df[df['fecha'] >= hace_30_dias]
@@ -145,51 +200,15 @@ with tab1:
         ax3.axis('off')
         st.pyplot(fig3)
 
-# --- Simulador ---
-with tab2:
-    st.markdown("<h1 style='text-align: center; color: black;'>🧪 Simulador de Reviews</h1>", unsafe_allow_html=True)
-    st.markdown("---")
-
-    st.subheader("✍️ Ingresar mensaje como usuario externo")
-    with st.form(key="manual_form"):
-        texto = st.text_area("Escribe aquí la reseña:")
-        canal = st.selectbox("Selecciona el canal:", ["web", "movil", "call_center", "redes_sociales"])
-        submit_manual = st.form_submit_button("📤 Enviar reseña manual")
-
-        if submit_manual and texto.strip() != "":
-            payload = {"texto": texto.strip(), "canal": canal}
-            respuesta = lambda_client.invoke(
-                FunctionName='AnalizarSentimiento',
-                InvocationType='RequestResponse',
-                Payload=json.dumps(payload).encode('utf-8')
-            )
-            result = json.loads(respuesta['Payload'].read())
-            st.success(f"Sentimiento detectado: {result.get('sentimiento', 'N/A')}")
-
-    st.markdown("---")
-    st.subheader("🎲 Simular envío desde reseñas reales")
-
-    base_df = cargar_dataset_base()
-    num_mensajes = st.slider("Número de reseñas a enviar:", min_value=1, max_value=20, value=5)
-    if st.button("🚀 Enviar mensajes simulados"):
-        muestras = base_df.sample(num_mensajes)
-        resultados = []
-        for _, fila in muestras.iterrows():
-            payload = {
-                "texto": str(fila["Review Text"]),
-                "canal": random.choice(["web", "movil", "call_center", "redes_sociales"])
-            }
-            respuesta = lambda_client.invoke(
-                FunctionName='AnalizarSentimiento',
-                InvocationType='RequestResponse',
-                Payload=json.dumps(payload).encode('utf-8')
-            )
-            result = json.loads(respuesta['Payload'].read())
-            resultados.append({
-                "texto": payload["texto"][:80] + "...",
-                "canal": payload["canal"],
-                "sentimiento": result.get("sentimiento", "N/A")
-            })
-        st.success(f"{num_mensajes} mensajes enviados exitosamente.")
-        st.dataframe(pd.DataFrame(resultados))
-
+        st.subheader("📨 Generar Informe Estratégico con LLM")
+        destinatario = st.text_input("Correo destino (verificado en SES):")
+        if st.button("Generar y Enviar Informe"):
+            df_negativas = df[df['sentimiento'] == 'NEGATIVE'].sort_values(by='fecha', ascending=False)
+            if df_negativas.empty:
+                st.warning("No hay reseñas negativas disponibles para generar el informe.")
+            else:
+                with st.spinner("Generando informe con LLM..."):
+                    prompt = construir_prompt_para_llm(df_negativas)
+                    informe = obtener_respuesta_llm(prompt)
+                    enviar_informe_por_correo(informe, destinatario)
+                st.success("Informe generado y enviado por correo correctamente.")
