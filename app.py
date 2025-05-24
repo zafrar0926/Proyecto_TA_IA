@@ -50,6 +50,18 @@ def construir_prompt_para_llm(df_negativas):
     )
     return prompt
 
+def construir_prompt_asistente(df_canal, pregunta, canal):
+    reseñas = df_canal['texto'].tolist()
+    contexto = "\n".join(f"- {r}" for r in reseñas[:10])
+    prompt = (
+        f"A continuación te muestro reseñas reales del canal '{canal}'.\n"
+        f"Por favor responde la siguiente pregunta basándote solo en esta información.\n\n"
+        f"RESEÑAS:\n{contexto}\n\n"
+        f"PREGUNTA: {pregunta}\n"
+        f"Responde de forma clara, útil y en tono ejecutivo."
+    )
+    return prompt
+
 def obtener_respuesta_llm(prompt):
     body = {
         "prompt": f"\n\nHuman:\n{prompt}\n\nAssistant:",
@@ -66,7 +78,7 @@ def obtener_respuesta_llm(prompt):
 
 def enviar_informe_por_correo(texto, destinatario):
     ses.send_email(
-        Source="santiagoz0926@gmail.com",  # tu correo verificado
+        Source="santiagoz0926@gmail.com",
         Destination={"ToAddresses": [destinatario]},
         Message={
             "Subject": {"Data": "Informe de reseñas críticas - Fashion Nova"},
@@ -95,7 +107,6 @@ def enviar_informe_por_correo(texto, destinatario):
         }
     )
 
-
 @st.cache_data
 def cargar_dataset_base():
     df = pd.read_csv("fashionnova_reviews.csv")
@@ -110,7 +121,7 @@ def cargar_dataset_base():
     return df
 
 # Tabs
-tab1, tab2 = st.tabs(["📊 Dashboard", "🧪 Simulador"])
+tab1, tab2, tab3 = st.tabs(["📊 Dashboard", "🧪 Simulador", "📣 Asistente Comercial"])
 
 # --- Dashboard ---
 with tab1:
@@ -121,6 +132,7 @@ with tab1:
         st.rerun()
 
     df = cargar_datos()
+    informe = None
 
     if df.empty:
         st.warning("No hay datos aún.")
@@ -212,3 +224,73 @@ with tab1:
                     informe = obtener_respuesta_llm(prompt)
                     enviar_informe_por_correo(informe, destinatario)
                 st.success("Informe generado y enviado por correo correctamente.")
+
+        if informe:
+            st.subheader("📝 Informe generado")
+            st.markdown(informe)
+
+# --- Simulador ---
+with tab2:
+    st.markdown("<h1 style='text-align: center; color: black;'>🧪 Simulador de Reviews</h1>", unsafe_allow_html=True)
+    st.markdown("---")
+
+    st.subheader("✍️ Ingresar mensaje como usuario externo")
+    with st.form(key="manual_form"):
+        texto = st.text_area("Escribe aquí la reseña:")
+        canal = st.selectbox("Selecciona el canal:", ["web", "movil", "call_center", "redes_sociales"])
+        submit_manual = st.form_submit_button("📤 Enviar reseña manual")
+
+        if submit_manual and texto.strip() != "":
+            payload = {"texto": texto.strip(), "canal": canal}
+            respuesta = lambda_client.invoke(
+                FunctionName='AnalizarSentimiento',
+                InvocationType='RequestResponse',
+                Payload=json.dumps(payload).encode('utf-8')
+            )
+            result = json.loads(respuesta['Payload'].read())
+            st.success(f"Sentimiento detectado: {result.get('sentimiento', 'N/A')}")
+
+    st.markdown("---")
+    st.subheader("🎲 Simular envío desde reseñas reales")
+
+    base_df = cargar_dataset_base()
+    num_mensajes = st.slider("Número de reseñas a enviar:", min_value=1, max_value=20, value=5)
+    if st.button("🚀 Enviar mensajes simulados"):
+        muestras = base_df.sample(num_mensajes)
+        resultados = []
+        for _, fila in muestras.iterrows():
+            payload = {
+                "texto": str(fila["Review Text"]),
+                "canal": random.choice(["web", "movil", "call_center", "redes_sociales"])
+            }
+            respuesta = lambda_client.invoke(
+                FunctionName='AnalizarSentimiento',
+                InvocationType='RequestResponse',
+                Payload=json.dumps(payload).encode('utf-8')
+            )
+            result = json.loads(respuesta['Payload'].read())
+            resultados.append({
+                "texto": payload["texto"][:80] + "...",
+                "canal": payload["canal"],
+                "sentimiento": result.get("sentimiento", "N/A")
+            })
+        st.success(f"{num_mensajes} mensajes enviados exitosamente.")
+        st.dataframe(pd.DataFrame(resultados))
+
+# --- Asistente Comercial ---
+with tab3:
+    st.markdown("<h1 style='text-align: center; color: black;'>📣 Asistente Comercial</h1>", unsafe_allow_html=True)
+    st.markdown("---")
+    canal = st.selectbox("Selecciona un canal para analizar:", ["web", "movil", "call_center", "redes_sociales"])
+    pregunta = st.text_area("¿Qué deseas saber sobre este canal?", "¿Qué preocupaciones tienen los clientes?")
+    if st.button("🤖 Consultar al Asistente"):
+        df = cargar_datos()
+        df_canal = df[df['canal'] == canal]
+        if df_canal.empty:
+            st.warning("No hay reseñas disponibles para este canal.")
+        else:
+            prompt = construir_prompt_asistente(df_canal, pregunta, canal)
+            with st.spinner("Consultando al asistente..."):
+                respuesta = obtener_respuesta_llm(prompt)
+            st.markdown("### 🧠 Respuesta del asistente")
+            st.markdown(respuesta)
