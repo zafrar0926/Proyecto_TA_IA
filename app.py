@@ -317,11 +317,18 @@ with tab2:
 
         if submit_manual and texto.strip() != "":
             payload = {"texto": texto.strip(), "canal": canal}
-            respuesta = lambda_client.invoke(
-                FunctionName='AnalizarSentimiento',
-                InvocationType='RequestResponse',
-                Payload=json.dumps(payload).encode('utf-8')
-            )
+            MANUAL_MESSAGES_SENT.inc()
+            REQUEST_COUNT.inc()
+            try:
+                with REQUEST_TIME.time():
+                    respuesta = lambda_client.invoke(
+                        FunctionName='AnalizarSentimiento',
+                        InvocationType='RequestResponse',
+                        Payload=json.dumps(payload).encode('utf-8')
+                    )
+            except Exception:
+                REQUEST_FAIL.inc()
+                raise
             result = json.loads(respuesta['Payload'].read())
             st.success(f"Sentimiento detectado: {result.get('sentimiento', 'N/A')}")
 
@@ -338,11 +345,18 @@ with tab2:
                 "texto": str(fila["Review Text"]),
                 "canal": random.choice(["web", "movil", "call_center", "redes_sociales"])
             }
-            respuesta = lambda_client.invoke(
-                FunctionName='AnalizarSentimiento',
-                InvocationType='RequestResponse',
-                Payload=json.dumps(payload).encode('utf-8')
-            )
+            SIMULATED_MESSAGES_SENT.inc()
+            REQUEST_COUNT.inc()
+            try:
+                with REQUEST_TIME.time():
+                    respuesta = lambda_client.invoke(
+                        FunctionName='AnalizarSentimiento',
+                        InvocationType='RequestResponse',
+                        Payload=json.dumps(payload).encode('utf-8')
+                    )
+            except Exception:
+                REQUEST_FAIL.inc()
+                raise
             result = json.loads(respuesta['Payload'].read())
             resultados.append({
                 "texto": payload["texto"][:80] + "...",
