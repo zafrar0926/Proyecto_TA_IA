@@ -20,13 +20,14 @@ Cuenta con:
 
 ```mermaid
 graph LR
-  A[Usuario en navegador] -->|interfaz| B(Streamlit)
-  B -->|payload| C[Lambda AWS (modelo de sentimiento)]
-  B -->|lectura| D[DynamoDB (Reseñas + predicciones)]
-  B -->|consulta| E[Amazon Bedrock (Claude-v2)]
-  B -->|envío| F[Amazon SES (Email)]
+  A[Usuario en navegador] -->|interfaz| B[Streamlit]
+  B -->|payload| C[Lambda AWS - modelo de sentimiento]
+  B -->|lectura| D[DynamoDB - Reseñas y predicciones]
+  B -->|consulta| E[Amazon Bedrock - Claude v2]
+  B -->|envío| F[Amazon SES - Email]
   B -->|/metrics| G[Prometheus]
-  G --> H[Grafana (Dashboard)]
+  G --> H[Grafana - Dashboard]
+
 ```
 
 - **Streamlit** actúa como el frontend y orquestador principal.
