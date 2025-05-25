@@ -6,13 +6,50 @@ import seaborn as sns
 from wordcloud import WordCloud
 from io import BytesIO
 import random
-import uuid
 import json
+import time
 from datetime import datetime, timedelta
 import plotly.graph_objects as go
+from prometheus_client import Counter, Histogram, start_http_server, REGISTRY
+
+# === Inicializar métricas Prometheus de forma segura ===
+def get_metric(metric_type, name, documentation):
+    try:
+        return REGISTRY._names_to_collectors[name]
+    except KeyError:
+        if metric_type == 'counter':
+            return Counter(name, documentation)
+        elif metric_type == 'histogram':
+            return Histogram(name, documentation)
+        else:
+            raise ValueError("Unsupported metric type")
+
+REQUEST_COUNT = get_metric('counter', 'inference_requests_total', 'Total de solicitudes a Lambda')
+REQUEST_FAIL = get_metric('counter', 'inference_requests_fail_total', 'Errores al invocar Lambda')
+REQUEST_TIME = get_metric('histogram', 'inference_duration_seconds', 'Duración de inferencia Lambda')
+SIMULATED_MESSAGES_SENT = get_metric('counter', 'simulated_reviews_sent_total', 'Mensajes simulados enviados')
+MANUAL_MESSAGES_SENT = get_metric('counter', 'manual_reviews_sent_total', 'Mensajes enviados desde la UI manual')
+LLM_REQUESTS = get_metric('counter', 'llm_prompt_total', 'Consultas hechas al LLM')
+LLM_ERRORS = get_metric('counter', 'llm_errors_total', 'Errores al consultar el LLM')
+
+start_http_server(8001)
 
 # Configurar app
 st.set_page_config(layout="wide", page_title="Fashion Nova App")
+
+# Estilo visual profesional
+st.markdown("""
+<style>
+body, .stApp {
+    background-color: #f4f6f9;
+    color: #333;
+    font-family: 'Segoe UI', sans-serif;
+}
+h1, h2, h3 {
+    color: #2b2d42;
+}
+</style>
+""", unsafe_allow_html=True)
 
 # Clientes AWS
 lambda_client = boto3.client("lambda", region_name="us-east-1")
@@ -22,6 +59,11 @@ bedrock = boto3.client("bedrock-runtime", region_name="us-east-1")
 ses = boto3.client("ses", region_name="us-east-1")
 
 # Funciones auxiliares
+# Métricas Prometheus (debes haberlas definido al inicio del archivo)
+# Ej: start_http_server(8001)
+# Counter: REQUEST_COUNT, REQUEST_FAIL, MANUAL_MESSAGES_SENT, SIMULATED_MESSAGES_SENT, LLM_REQUESTS, LLM_ERRORS
+# Histogram: REQUEST_TIME
+
 def cargar_datos():
     response = tabla.scan()
     df = pd.DataFrame(response['Items'])
@@ -63,18 +105,23 @@ def construir_prompt_asistente(df_canal, pregunta, canal):
     return prompt
 
 def obtener_respuesta_llm(prompt):
-    body = {
-        "prompt": f"\n\nHuman:\n{prompt}\n\nAssistant:",
-        "max_tokens_to_sample": 800,
-        "temperature": 0.7,
-    }
-    response = bedrock.invoke_model(
-        modelId="anthropic.claude-v2",
-        body=json.dumps(body),
-        contentType="application/json"
-    )
-    resultado = json.loads(response['body'].read())
-    return resultado['completion']
+    LLM_REQUESTS.inc()
+    try:
+        body = {
+            "prompt": f"\n\nHuman:\n{prompt}\n\nAssistant:",
+            "max_tokens_to_sample": 800,
+            "temperature": 0.7,
+        }
+        response = bedrock.invoke_model(
+            modelId="anthropic.claude-v2",
+            body=json.dumps(body),
+            contentType="application/json"
+        )
+        resultado = json.loads(response['body'].read())
+        return resultado['completion']
+    except Exception:
+        LLM_ERRORS.inc()
+        raise
 
 def enviar_informe_por_correo(texto, destinatario):
     ses.send_email(
@@ -107,6 +154,34 @@ def enviar_informe_por_correo(texto, destinatario):
         }
     )
 
+def enviar_simulacion_tiempo_real(df_base, limite_minutos=10):
+    start_time = time.time()
+    placeholder = st.empty()
+    i = 0
+    while time.time() - start_time < limite_minutos * 60:
+        fila = df_base.sample(1).iloc[0]
+        payload = {
+            "texto": str(fila["Review Text"]),
+            "canal": random.choice(["web", "movil", "call_center", "redes_sociales"])
+        }
+        SIMULATED_MESSAGES_SENT.inc()
+        REQUEST_COUNT.inc()
+        try:
+            with REQUEST_TIME.time():
+                respuesta = lambda_client.invoke(
+                    FunctionName='AnalizarSentimiento',
+                    InvocationType='RequestResponse',
+                    Payload=json.dumps(payload).encode('utf-8')
+                )
+        except Exception:
+            REQUEST_FAIL.inc()
+            raise
+        result = json.loads(respuesta['Payload'].read())
+        i += 1
+        placeholder.info(f"Enviado #{i}: {payload['canal']} → {result.get('sentimiento', 'N/A')}")
+        time.sleep(2)
+    placeholder.success(f"Simulación finalizada. Total enviados: {i}")
+
 @st.cache_data
 def cargar_dataset_base():
     df = pd.read_csv("fashionnova_reviews.csv")
@@ -125,7 +200,7 @@ tab1, tab2, tab3 = st.tabs(["📊 Dashboard", "🧪 Simulador", "📣 Asistente 
 
 # --- Dashboard ---
 with tab1:
-    st.markdown("<h1 style='text-align: center; color: black;'>🛍️ Fashion Nova Reviews Monitoring</h1>", unsafe_allow_html=True)
+    st.markdown("<h1 style='text-align: center;'>🛍️ Fashion Nova Reviews Monitoring</h1>", unsafe_allow_html=True)
     st.markdown("---")
 
     if st.button("🔁 Actualizar análisis"):
@@ -231,9 +306,9 @@ with tab1:
 
 # --- Simulador ---
 with tab2:
-    st.markdown("<h1 style='text-align: center; color: black;'>🧪 Simulador de Reviews</h1>", unsafe_allow_html=True)
+    st.markdown("<h1 style='text-align: center;'>🧪 Simulador de Reviews</h1>", unsafe_allow_html=True)
     st.markdown("---")
-
+    
     st.subheader("✍️ Ingresar mensaje como usuario externo")
     with st.form(key="manual_form"):
         texto = st.text_area("Escribe aquí la reseña:")
@@ -252,9 +327,9 @@ with tab2:
 
     st.markdown("---")
     st.subheader("🎲 Simular envío desde reseñas reales")
-
     base_df = cargar_dataset_base()
     num_mensajes = st.slider("Número de reseñas a enviar:", min_value=1, max_value=20, value=5)
+
     if st.button("🚀 Enviar mensajes simulados"):
         muestras = base_df.sample(num_mensajes)
         resultados = []
@@ -277,9 +352,16 @@ with tab2:
         st.success(f"{num_mensajes} mensajes enviados exitosamente.")
         st.dataframe(pd.DataFrame(resultados))
 
+    st.markdown("---")
+    st.subheader("🎬 Simulación en Tiempo Real (para presentación)")
+
+    if st.button("🎬 Activar simulación en tiempo real"):
+        st.info("Iniciando simulación por 10 minutos (máx). Se enviará 1 reseña cada 2 segundos.")
+        enviar_simulacion_tiempo_real(base_df, limite_minutos=10)
+
 # --- Asistente Comercial ---
 with tab3:
-    st.markdown("<h1 style='text-align: center; color: black;'>📣 Asistente Comercial</h1>", unsafe_allow_html=True)
+    st.markdown("<h1 style='text-align: center;'>📣 Asistente Comercial</h1>", unsafe_allow_html=True)
     st.markdown("---")
     canal = st.selectbox("Selecciona un canal para analizar:", ["web", "movil", "call_center", "redes_sociales"])
     pregunta = st.text_area("¿Qué deseas saber sobre este canal?", "¿Qué preocupaciones tienen los clientes?")

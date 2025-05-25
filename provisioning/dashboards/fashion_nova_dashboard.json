@@ -1,0 +1,63 @@
+{
+  "id": null,
+  "uid": "fashion-nova-observability",
+  "title": "Observabilidad - Fashion Nova",
+  "timezone": "browser",
+  "refresh": "10s",
+  "schemaVersion": 30,
+  "version": 1,
+  "time": {
+    "from": "now-15m",
+    "to": "now"
+  },
+  "templating": {
+    "list": []
+  },
+  "annotations": {
+    "list": []
+  },
+  "panels": [
+    {
+      "type": "stat",
+      "title": "Total Inferencias",
+      "targets": [{ "expr": "inference_requests_total" }],
+      "gridPos": { "x": 0, "y": 0, "w": 6, "h": 4 }
+    },
+    {
+      "type": "stat",
+      "title": "Errores Inferencia",
+      "targets": [{ "expr": "inference_requests_fail_total" }],
+      "gridPos": { "x": 6, "y": 0, "w": 6, "h": 4 }
+    },
+    {
+      "type": "graph",
+      "title": "Duración de Inferencia",
+      "targets": [{ "expr": "inference_duration_seconds" }],
+      "gridPos": { "x": 0, "y": 4, "w": 12, "h": 6 }
+    },
+    {
+      "type": "stat",
+      "title": "Mensajes Simulados",
+      "targets": [{ "expr": "simulated_reviews_sent_total" }],
+      "gridPos": { "x": 0, "y": 10, "w": 6, "h": 4 }
+    },
+    {
+      "type": "stat",
+      "title": "Mensajes Manuales",
+      "targets": [{ "expr": "manual_reviews_sent_total" }],
+      "gridPos": { "x": 6, "y": 10, "w": 6, "h": 4 }
+    },
+    {
+      "type": "stat",
+      "title": "Consultas al LLM",
+      "targets": [{ "expr": "llm_prompt_total" }],
+      "gridPos": { "x": 0, "y": 14, "w": 6, "h": 4 }
+    },
+    {
+      "type": "stat",
+      "title": "Errores del LLM",
+      "targets": [{ "expr": "llm_errors_total" }],
+      "gridPos": { "x": 6, "y": 14, "w": 6, "h": 4 }
+    }
+  ]
+}
