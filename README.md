@@ -19,6 +19,7 @@ Cuenta con:
 ## 🧩 Arquitectura Detallada
 
 ```mermaid
+
 flowchart LR
     subgraph Navegador
         A[Usuario] -->|Inputs| B[Streamlit App]
@@ -49,6 +50,7 @@ flowchart LR
     style H fill:#E8EAF6,stroke:#3F51B5,stroke-width:2px
     style I fill:#EDE7F6,stroke:#673AB7,stroke-width:2px
 
+```
 
 ---
 
