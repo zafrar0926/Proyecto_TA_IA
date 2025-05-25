@@ -16,26 +16,39 @@ Cuenta con:
 
 ---
 
-## 🏗️ Arquitectura General
+## 🧩 Arquitectura Detallada
 
 ```mermaid
-graph LR
-  A[Usuario en navegador] -->|interfaz| B[Streamlit]
-  B -->|payload| C[Lambda AWS - modelo de sentimiento]
-  B -->|lectura| D[DynamoDB - Reseñas y predicciones]
-  B -->|consulta| E[Amazon Bedrock - Claude v2]
-  B -->|envío| F[Amazon SES - Email]
-  B -->|/metrics| G[Prometheus]
-  G --> H[Grafana - Dashboard]
+flowchart LR
+    subgraph Navegador
+        A[👤 Usuario] -->|Inputs| B[🖥️ Streamlit App]
+    end
 
-```
+    subgraph Backend
+        B -->|Texto + Canal| C[⚙️ Lambda: AnalizarSentimiento]
+        C -->|Sentimiento| D[(🧠 Amazon Comprehend)]
+        D -->|Resultado| C
+        C -->|Guardar resultado| E[(🗄️ DynamoDB)]
+        B -->|Leer reseñas| E
 
-- **Streamlit** actúa como el frontend y orquestador principal.
-- **Lambda** ejecuta el análisis de sentimiento (modelo NLP).
-- **DynamoDB** almacena las reseñas junto con su metainformación y predicción.
-- **Amazon Bedrock** permite generar resúmenes e informes desde reseñas críticas.
-- **Amazon SES** permite enviar estos informes por correo electrónico.
-- **Prometheus + Grafana** permiten auditar en tiempo real la salud y comportamiento de la plataforma.
+        B -->|Reseñas negativas| F[🤖 Bedrock (Claude-v2)]
+        F -->|Informe generado| G[📧 Amazon SES]
+    end
+
+    subgraph Observabilidad
+        B -->|Métricas /metrics| H[(📊 Prometheus)]
+        H --> I[📈 Grafana]
+    end
+
+    style A fill:#E3F2FD,stroke:#2196F3,stroke-width:2px
+    style B fill:#FFF3E0,stroke:#FF9800,stroke-width:2px
+    style C fill:#E8F5E9,stroke:#4CAF50,stroke-width:2px
+    style D fill:#F3E5F5,stroke:#9C27B0,stroke-width:2px
+    style E fill:#E0F7FA,stroke:#00BCD4,stroke-width:2px
+    style F fill:#FCE4EC,stroke:#E91E63,stroke-width:2px
+    style G fill:#FFF,stroke:#607D8B,stroke-width:2px
+    style H fill:#E8EAF6,stroke:#3F51B5,stroke-width:2px
+    style I fill:#EDE7F6,stroke:#673AB7,stroke-width:2px
 
 ---
 
