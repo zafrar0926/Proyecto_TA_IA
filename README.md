@@ -30,7 +30,6 @@ flowchart LR
         D -->|Resultado| C
         C -->|Guardar resultado| E[DynamoDB]
         B -->|Leer reseñas| E
-
         B -->|Reseñas negativas| F[Amazon Bedrock]
         F -->|Informe generado| G[Amazon SES]
     end
@@ -49,6 +48,7 @@ flowchart LR
     style G fill:#F5F5F5,stroke:#607D8B,stroke-width:2px
     style H fill:#E8EAF6,stroke:#3F51B5,stroke-width:2px
     style I fill:#EDE7F6,stroke:#673AB7,stroke-width:2px
+
 
 ---
 
